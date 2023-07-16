@@ -3,9 +3,9 @@ from pathlib import Path
 
 
 SNIPS_DATA_BASE_URL = (
-    "https://github.com/MNIKIEMA/slot_filling_and_intent_detection_of_SLU/tree/master/data/snips/"
+    "https://github.com/MNIKIEMA/slot_filling_and_intent_detection_of_SLU/blob/master/data/snips/"
 )
-root = Path("./snips")
+
 for filename in ["train", "valid", "test", "vocab.intent", "vocab.slot"]:
     path = Path(r"snips-data/"+filename)
     print(path)
