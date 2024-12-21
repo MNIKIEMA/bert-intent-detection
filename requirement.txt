@@ -1,0 +1,4 @@
+transformers @ git+https://github.com/huggingface/transformers.git
+torch --index-url https://download.pytorch.org/whl/cu121
+pandas~=2.2.3
+matplotlib~=3.10.0

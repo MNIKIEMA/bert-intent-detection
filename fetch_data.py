@@ -10,5 +10,6 @@ for filename in ["train", "valid", "test", "vocab.intent", "vocab.slot"]:
     path = Path(r"snips-data/"+filename)
     print(path)
     if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
         print(f"Downloading {filename}...")
         urlretrieve(SNIPS_DATA_BASE_URL + filename + "?raw=true", path)
