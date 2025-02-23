@@ -1,9 +1,5 @@
-import torch.nn as nn
-import torch.optim as optim
-import torch
-
-
-"""This is an example of a complete training pipeline with logging and checkpointing,
+"""
+This is an example of a complete training pipeline with logging and checkpointing,
 using only vanilla PyTorch. While frameworks like PyTorch-Lightning (PL) can take care
 of most of this for you, it is a good idea to understand what goes on under the hood.
 In the future, you might have to work with codebases that do not use PL, or you might
@@ -29,7 +25,8 @@ import sys
 
 import colorlog
 import torch
-import torchvision.models as models
+import torch.nn as nn
+import torch.optim as optim
 from torch.nn import functional as F
 
 # Avoid wildcard imports (from basic.data import *) as they make it very
@@ -37,34 +34,33 @@ from torch.nn import functional as F
 from basic.utils import averager, write_and_rename
 
 
-logger = logging.getLogger('train')
+logger = logging.getLogger("train")
 
 
 def setup_logging(xp_folder):
-    """Setup logging, with one log to the stdout, and one to a train.log file.
-    """
+    """Setup logging, with one log to the stdout, and one to a train.log file."""
     # See https://docs.python.org/3/howto/logging-cookbook.html#logging-cookbook for reference.
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    fh = logging.FileHandler(xp_folder / 'train.log')
+    fh = logging.FileHandler(xp_folder / "train.log")
     fh.setLevel(logging.INFO)
 
     sh = logging.StreamHandler(sys.stdout)
     sh.setLevel(logging.INFO)
 
     formatter = colorlog.ColoredFormatter(
-        '[%(cyan)s%(asctime)s%(reset)s][%(blue)s%(name)s%(reset)s]'
-        '[%(log_color)s%(levelname)s%(reset)s] %(message)s',
-        datefmt='%m-%d %H:%M:%S',  # removing milliseconds from log,
-                                   # they take space and are rarely useful
+        "[%(cyan)s%(asctime)s%(reset)s][%(blue)s%(name)s%(reset)s]"
+        "[%(log_color)s%(levelname)s%(reset)s] %(message)s",
+        datefmt="%m-%d %H:%M:%S",  # removing milliseconds from log,
+        # they take space and are rarely useful
         reset=True,
         log_colors={
-            'DEBUG':    'cyan',
-            'INFO':     'green',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white',
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "red,bg_white",
         },
     )
     fh.setFormatter(formatter)
@@ -75,32 +71,39 @@ def setup_logging(xp_folder):
 
 
 def get_parser():
-    """Return the parser for commandline args.
-    """
+    """Return the parser for commandline args."""
     # For now we use argparse to handle options passed to the training script.
     # For more complex project, advanced solutions like Hydra are usually
     # prefered (https://github.com/facebookresearch/hydra)
-    parser = argparse.ArgumentParser('train.py')
-    parser.add_argument('-e', '--epochs', type=int, default=100)
-    parser.add_argument('-b', '--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=1e-3)
-    parser.add_argument('--model', default='resnet18')
-    parser.add_argument('--data', default='data/', help='Root for data storage.')
+    parser = argparse.ArgumentParser("train.py")
+    parser.add_argument("-e", "--epochs", type=int, default=100)
+    parser.add_argument("-b", "--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--weight_decay", type=float, default=1e-3)
+    parser.add_argument("--model", default="resnet18")
+    parser.add_argument("--data", default="data/", help="Root for data storage.")
 
-    parser.add_argument('--storage', default=Path('./outputs'), type=Path,
-                        help='Where experiments are stored.')
-    parser.add_argument('-R', '--restart', action='store_true',
-                        help='Wipes out previous checkpoints or logs.')
+    parser.add_argument(
+        "--storage",
+        default=Path("./outputs"),
+        type=Path,
+        help="Where experiments are stored.",
+    )
+    parser.add_argument(
+        "-R",
+        "--restart",
+        action="store_true",
+        help="Wipes out previous checkpoints or logs.",
+    )
 
     return parser
 
 
 # Those args will not be used for generating the experiment name.
 IGNORED_FOR_NAME = [
-    'restart',
-    'storage',
-    'data',
+    "restart",
+    "storage",
+    "data",
 ]
 
 
@@ -143,8 +146,8 @@ def do_epoch(epoch, model, loader, optimizer=None):
         accuracy = (label == predicted_label).float().mean()
 
         metrics = {
-            'loss': loss,
-            'accuracy': accuracy,
+            "loss": loss,
+            "accuracy": accuracy,
         }
         metrics = average(metrics)
 
@@ -153,10 +156,110 @@ def do_epoch(epoch, model, loader, optimizer=None):
             optimizer.step()
             optimizer.zero_grad()
 
-    label = 'test' if optimizer is None else 'train'
-    logger.info(f'Epoch {epoch:03d} {label: <5} summary '
-                f'loss: {metrics["loss"]:.3f}, '
-                f'acc.: {metrics["accuracy"]:6.2%}')
+    label = "test" if optimizer is None else "train"
+    logger.info(
+        f"Epoch {epoch:03d} {label: <5} summary "
+        f"loss: {metrics['loss']:.3f}, "
+        f"acc.: {metrics['accuracy']:6.2%}"
+    )
+    return metrics
+
+
+def do_intent_epoch(epoch, model, loader, optimizer=None):
+    """Run a single epoch for intent classification training/evaluation."""
+    device = next(model.parameters()).device
+    average = averager()
+
+    criterion = nn.CrossEntropyLoss()
+
+    for input_ids, attention_mask, intent_label in loader:
+        # Move everything to device
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        intent_label = intent_label.to(device)
+
+        # Forward pass
+        intent_logits = model(input_ids, attention_mask=attention_mask)
+
+        # Calculate loss
+        loss = criterion(intent_logits, intent_label)
+
+        # Calculate accuracy
+        intent_pred = intent_logits.argmax(dim=1)
+        accuracy = (intent_pred == intent_label).float().mean()
+
+        metrics = {"loss": loss.item(), "accuracy": accuracy.item()}
+        metrics = average(metrics)
+
+        if optimizer is not None:
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    label = "test" if optimizer is None else "train"
+    logger.info(
+        f"Epoch {epoch:03d} {label: <5} summary "
+        f"loss: {metrics['loss']:.3f}, "
+        f"acc.: {metrics['accuracy']:6.2%}"
+    )
+
+    return metrics
+
+
+def do_joint_epoch(epoch, model, loader, slot_map, optimizer=None):
+    """Run a single epoch for joint intent and slot prediction training/evaluation."""
+    device = next(model.parameters()).device
+    average = averager()
+
+    intent_criterion = nn.CrossEntropyLoss()
+    slot_criterion = nn.CrossEntropyLoss()
+
+    for input_ids, attention_mask, intent_label, slot in loader:
+        # Move everything to device
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        intent_label = intent_label.to(device)
+        slot = slot.to(device)
+
+        # Forward pass - model expects input_ids and attention_mask
+        slot_logits, intent_logits = model(input_ids, attention_mask=attention_mask)
+
+        # Calculate losses
+        slot_loss = slot_criterion(
+            slot_logits.view(-1, len(slot_map)), slot.view(-1).long()
+        )
+        intent_loss = intent_criterion(intent_logits, intent_label)
+        loss = slot_loss + intent_loss
+
+        # Calculate accuracies
+        intent_pred = intent_logits.argmax(dim=1)
+        slot_pred = slot_logits.argmax(dim=2)
+
+        intent_accuracy = (intent_pred == intent_label).float().mean()
+        slot_accuracy = (slot_pred == slot).float().mean()
+
+        metrics = {
+            "loss": loss.item(),
+            "intent_loss": intent_loss.item(),
+            "slot_loss": slot_loss.item(),
+            "intent_accuracy": intent_accuracy.item(),
+            "slot_accuracy": slot_accuracy.item(),
+        }
+        metrics = average(metrics)
+
+        if optimizer is not None:
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    label = "test" if optimizer is None else "train"
+    logger.info(
+        f"Epoch {epoch:03d} {label: <5} summary "
+        f"loss: {metrics['loss']:.3f}, "
+        f"intent acc.: {metrics['intent_accuracy']:6.2%}, "
+        f"slot acc.: {metrics['slot_accuracy']:6.2%}"
+    )
+
     return metrics
 
 
@@ -173,8 +276,10 @@ def main():
     if args.restart and xp_folder.exists():
         shutil.rmtree(xp_folder)
     xp_folder.mkdir(exist_ok=True, parents=True)
-    checkpoint_path = xp_folder / 'checkpoint.th'
-    history_file = xp_folder / 'history.json'  # convenient way to get metrics for later plotting
+    checkpoint_path = xp_folder / "checkpoint.th"
+    history_file = (
+        xp_folder / "history.json"
+    )  # convenient way to get metrics for later plotting
 
     setup_logging(xp_folder)
     logger.info("This is experiment %s", name)
@@ -190,17 +295,18 @@ def main():
     if cuda:
         model.cuda()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = optim.SGD(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     history = []  # keep track of all metrics
     if checkpoint_path.exists():
         # map_location=cpu, avoid issues when loading checkpoints from machines with different
         # numbers of GPUs.
         logger.info("Loading checkpoint %s", checkpoint_path)
-        pkg = torch.load(checkpoint_path, map_location='cpu')
-        model.load_state_dict(pkg['model_state'])
-        optimizer.load_state_dict(pkg['optimizer_state'])
-        history = pkg['history']
+        pkg = torch.load(checkpoint_path, map_location="cpu")
+        model.load_state_dict(pkg["model_state"])
+        optimizer.load_state_dict(pkg["optimizer_state"])
+        history = pkg["history"]
 
     for epoch in range(len(history), args.epochs):
         model.train()
@@ -208,22 +314,24 @@ def main():
         model.eval()
         test_metrics = do_epoch(epoch, model, testloader)
 
-        history.append({
-            'train': train_metrics,
-            'test': test_metrics,
-        })
+        history.append(
+            {
+                "train": train_metrics,
+                "test": test_metrics,
+            }
+        )
 
         pkg = {
-            'history': history,
+            "history": history,
             # Store the state dict, not the model itself directly. This is more robust
             # to code change in the model class. On loading, you can use the `args`
             # stored to instantiate again the model with the right hyperparameters.
-            'model_state': model.state_dict(),
-            'optimizer_state': optimizer.state_dict(),
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
             # Storing args is a great idea for the future. You will most likely store
             # somewhere about your best checkpoints for a research project, then forget
             # all about it for a year, find it back and wonder how it was train :)
-            'args': args,
+            "args": args,
         }
         with write_and_rename(checkpoint_path) as tmp_file:
             # Saving directly on the checkpoint path is risky: if the job gets interrupted
@@ -234,52 +342,10 @@ def main():
 
         # This one is not as critical, as the full history is still stored
         # in the checkpoint file.
-        json.dump(history, open(history_file, 'w'))
+        json.dump(history, open(history_file, "w"))
 
 
-
-
-
-def perf(model, loader, device):
-    criterion = nn.CrossEntropyLoss()
-    model.eval()
-    total_loss = num = correct = 0
-    for x, mask, y in loader:
-      x = x.to(device)
-      y = y.to(device)
-      mask = mask.to(device)
-      with torch.no_grad():
-        y_scores = model(x, mask)
-        loss = criterion(y_scores, y)
-        y_pred = torch.max(y_scores, 1)[1]
-        correct += torch.sum(y_pred == y).item()
-        total_loss += loss.item()
-        num += len(y)
-    return total_loss / num, correct / num
-
-
-
-def fit(model,train_loader, valid_loader, epochs, device, lr=1e-3):
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    for epoch in range(epochs):
-        model.train()
-        total_loss = num = 0
-        for x, mask, y in train_loader:
-            x = x.to(device)
-            y = y.to(device)
-            mask = mask.to(device)
-            optimizer.zero_grad()
-            y_scores = model(x, mask)
-            loss = criterion(y_scores, y)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            num += len(y)
-        print(epoch, total_loss / num, *perf(model, valid_loader))
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception:

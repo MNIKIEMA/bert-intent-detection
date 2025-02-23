@@ -1,5 +1,6 @@
-"""Utility functions.
-"""
+"""Utility functions."""
+
+import typing as t
 from contextlib import contextmanager
 from collections import defaultdict
 from pathlib import Path
@@ -16,8 +17,8 @@ def averager(beta: float = 1):
     average is performed. If `beta < 1`, an exponential moving average
     is performed instead.
     """
-    count = defaultdict(float)
-    total = defaultdict(float)
+    count: t.DefaultDict[str, float] = defaultdict(float)
+    total: t.DefaultDict[str, float] = defaultdict(float)
 
     def _update(metrics: dict, weight: float = 1) -> dict:
         nonlocal total, count
@@ -25,6 +26,7 @@ def averager(beta: float = 1):
             total[key] = total[key] * beta + weight * float(value)
             count[key] = count[key] * beta + weight
         return {key: tot / count[key] for key, tot in total.items()}
+
     return _update
 
 

@@ -1,0 +1,14 @@
+[project]
+name = "bert-intent-detection"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "colorlog>=6.9.0",
+    "jupyterlab>=4.3.5",
+    "matplotlib>=3.10.0",
+    "numpy~=1.26.0",
+    "pandas>=2.2.3",
+    "transformers>=4.49.0",
+]
