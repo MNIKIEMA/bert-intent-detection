@@ -28,10 +28,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.nn import functional as F
-
+from transformers import AutoTokenizer, AutoModel
 # Avoid wildcard imports (from basic.data import *) as they make it very
 # hard to know which function is coming from which file for collaborators.
 from basic.utils import averager, write_and_rename
+from basic.bert_model import JointIntentAndSlotFillingModel
 
 
 logger = logging.getLogger("train")
@@ -80,8 +81,8 @@ def get_parser():
     parser.add_argument("-b", "--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--weight_decay", type=float, default=1e-3)
-    parser.add_argument("--model", default="resnet18")
-    parser.add_argument("--data", default="data/", help="Root for data storage.")
+    parser.add_argument("--model", default="answerdotai/ModernBERT-base")
+    parser.add_argument("--data", default="snips-data", help="Root for data storage.")
 
     parser.add_argument(
         "--storage",
@@ -284,10 +285,24 @@ def main():
     setup_logging(xp_folder)
     logger.info("This is experiment %s", name)
     logger.info("Checkout %s for logs and checkpoints", xp_folder)
+    data_path = Path(args.data)
 
     trainloader, testloader, num_classes = get_dataloaders(args.data, args.batch_size)
 
-    model = getattr(models, args.model)(num_classes=num_classes)
+    intent_names = (data_path / "vocab.intent").read_text("utf-8").split()
+    intent_map = dict((label, idx) for idx, label in enumerate(intent_names))
+
+    slot_names = ["[PAD]"] + (data_path / "vocab.slot").read_text("utf-8").strip().splitlines()
+    slot_map = {}
+    for label in slot_names:
+        slot_map[label] = len(slot_map)
+
+    model_name = args.model
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+    model = JointIntentAndSlotFillingModel(model=model,
+                                           intent_num_labels=len(intent_map),
+                                           slot_num_labels=len(slot_map))
 
     # Move model to GPU if cuda is available. If you have multiple GPU and want
     # to select one, you can run with `CUDA_VISIBLE_DEVICES=1 ./train.py` (GPU indexes starts at 0)
@@ -295,7 +310,7 @@ def main():
     if cuda:
         model.cuda()
 
-    optimizer = optim.SGD(
+    optimizer = optim.Adam(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     history = []  # keep track of all metrics
