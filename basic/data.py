@@ -1,7 +1,21 @@
+import typing as t
+from enum import Enum
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import torch
+from torch.utils.data import TensorDataset, DataLoader
+
+
+class Task(Enum):
+    INTENT = "intent"
+    JOINT = "joint"
+
+
+class Split(Enum):
+    TRAIN = "train"
+    VALID = "valid"
+    TEST = "test"
 
 
 def parse_line(line):
@@ -17,38 +31,41 @@ def parse_line(line):
     }
 
 
-def load_data(data_path: str):
+def load_lines(data_path: str):
     lines = Path(data_path).read_text("utf-8").strip().splitlines()
-    data = [parse_line(line) for line in lines]
+    return lines
 
+
+def load_data(data_path: str):
+    lines = load_lines(data_path)
+    data = [parse_line(line) for line in lines]
     return pd.DataFrame(data)
+
+
+def get_intent_map(data_path: str):
+    intent_names = load_lines(data_path)
+    return {label: i for i, label in enumerate(intent_names)}
+
+
+def get_slot_map(data_path: str):
+    slot_names = ["[PAD]"]
+    slot_names += load_lines(data_path)
+    slot_map: t.Dict[str, int] = {}
+    for label in slot_names:
+        slot_map[label] = len(slot_map)
+    return slot_map
 
 
 def encode_dataset(tokenizer, text_sequences, max_length):
     token_ids = np.zeros(shape=(len(text_sequences), max_length), dtype=np.int32)
     for i, text_sequence in enumerate(text_sequences):
         encoded = tokenizer.encode(text_sequence)
-        token_ids[i, 0:len(encoded)] = encoded
+        token_ids[i, 0:len(encoded)] = encoded  # fmt: skip
     attention_masks = (token_ids != 0).astype(np.int32)
     return {
         "input_ids": torch.from_numpy(token_ids),
         "attention_mask": torch.from_numpy(attention_masks),
     }
-
-
-def load_intent(data_path: str):
-    df = load_data(data_path)
-    intent_label = df["intent_label"].unique()
-    ids2intent = {label: i for i, label in enumerate(intent_label)}
-    intent_ids = df["intent_label"].map(ids2intent).values
-    return ids2intent, intent_ids
-
-
-def load_slot(data_path: str) -> dict:
-    df = load_data(data_path)
-    slot_label = df["word_labels"].unique()
-    slot_dict = {label: i for i, label in enumerate(slot_label)}
-    return slot_dict
 
 
 def encode_token_labels(text_sequences, slot_names, tokenizer, slot_map, max_length):
@@ -63,7 +80,7 @@ def encode_token_labels(text_sequences, slot_names, tokenizer, slot_map, max_len
                 expand_label = word_label
             encoded_labels.extend([slot_map[expand_label]] * (len(tokens) - 1))
         try:
-            encoded[i, 1:len(encoded_labels) + 1] = encoded_labels
+            encoded[i, 1:len(encoded_labels) + 1] = encoded_labels  # fmt: skip
         except:
             print(len(tokenizer.tokenize(text_sequence)), len(encoded_labels))
             print(text_sequence)
@@ -71,19 +88,57 @@ def encode_token_labels(text_sequences, slot_names, tokenizer, slot_map, max_len
     return encoded
 
 
-def get_dataloaders(data_path, batch_size, tokenizer):
-    intent_dict = load_intent(data_path)
-    slot_dict = load_slot(data_path)
-    df_train = load_data(data_path)
-    df_valid = load_data(data_path)
-    df_test = load_data(data_path)
+def load_intent(data_path: str):
+    intent2ids = get_intent_map(data_path)
+    return intent2ids
 
-    slot_train = encode_token_labels(
-    df_train["words"], df_train["word_labels"], tokenizer, slot_dict, 42
+
+def load_slot(data_path: str) -> t.Dict[str, int]:
+    slot_label = get_slot_map(data_path)
+    return slot_label
+
+
+def encode_texts_and_intent(
+    tokenizer, df: pd.DataFrame, intent_dict: t.Dict[str, int], max_length: int
+):
+    intent_labels = torch.from_numpy(df["intent_label"].map(intent_dict).values)
+    encoded_texts = encode_dataset(tokenizer, df["words"], max_length)
+    return TensorDataset(
+        encoded_texts["input_ids"],
+        encoded_texts["attention_mask"],
+        intent_labels,
     )
-    slot_valid = encode_token_labels(
-        df_valid["words"], df_valid["word_labels"], tokenizer, slot_dict, 42
-    )
-    slot_test = encode_token_labels(
-        df_test["words"], df_test["word_labels"], tokenizer, slot_dict, 42
-    )
+
+
+def create_dataloader(dataset, batch_size, shuffle=True):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def get_dataloaders(
+    data_path,
+    batch_size,
+    tokenizer,
+    max_length=42,
+    shuffle=True,
+    task: str = "intent",
+    split: str = "train",
+):
+    task_type = Task(task)
+    split_type = Split(split)
+    df = load_data(data_path)
+    intent_dict = load_intent(data_path)
+    dataset = encode_texts_and_intent(tokenizer, df, intent_dict, max_length)
+    if task_type == Task.INTENT:
+        return create_dataloader(dataset, batch_size, shuffle)
+    else:
+        slot_dict = load_slot(data_path)
+        slot_dataset = encode_token_labels(
+            df["words"], df["word_labels"], tokenizer, slot_dict, max_length
+        )
+        dataset = TensorDataset(
+            dataset[0],
+            dataset[1],
+            dataset[2],
+            torch.from_numpy(slot_dataset),
+        )
+        return create_dataloader(dataset, batch_size, shuffle)
