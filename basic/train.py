@@ -31,6 +31,7 @@ from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModel
 # Avoid wildcard imports (from basic.data import *) as they make it very
 # hard to know which function is coming from which file for collaborators.
+from basic.data import get_dataloaders
 from basic.utils import averager, write_and_rename
 from basic.bert_model import JointIntentAndSlotFillingModel
 
